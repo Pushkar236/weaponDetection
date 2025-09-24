@@ -17,12 +17,14 @@ interface CCTVFeedProps {
   cameraName: string;
   camera?: Camera;
   onDetection: (detection: DetectionData) => void;
+  active?: boolean; // Only send frames if true
 }
 
 const CCTVFeed: React.FC<CCTVFeedProps> = ({
   cameraName,
   camera,
   onDetection,
+  active = false,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -30,6 +32,10 @@ const CCTVFeed: React.FC<CCTVFeedProps> = ({
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [isDetecting, setIsDetecting] = useState(false);
   const [error, setError] = useState<string>("");
+  const [isAutoDetecting, setIsAutoDetecting] = useState(false);
+  const inFlightRef = useRef(false);
+  const [threat, setThreat] = useState(false);
+  const threatTimeoutRef = useRef<number | null>(null);
 
   // Initialize webcam stream
   useEffect(() => {
@@ -233,8 +239,89 @@ const CCTVFeed: React.FC<CCTVFeedProps> = ({
     }
   };
 
+  // --- 2fps automatic detection logic (only CAM-03 sends frames) ---
+  useEffect(() => {
+    // Only proceed for the camera named CAM-03 and when no error is present
+    if (error || cameraName !== "CAM-03") return;
+    setIsAutoDetecting(true);
+
+    const interval = setInterval(async () => {
+      if (inFlightRef.current || !videoRef.current || !canvasRef.current) return;
+      inFlightRef.current = true;
+
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        inFlightRef.current = false;
+        return;
+      }
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      ctx.drawImage(video, 0, 0);
+
+      canvas.toBlob(async (blob) => {
+        if (!blob) {
+          inFlightRef.current = false;
+          return;
+        }
+        try {
+          // Convert Blob to ArrayBuffer, then to base64 (browser-safe)
+          const arrayBuffer = await blob.arrayBuffer();
+          const base64Str = btoa(
+            new Uint8Array(arrayBuffer)
+              .reduce((data, byte) => data + String.fromCharCode(byte), "")
+          );
+          const payload = JSON.stringify({ image_base64: base64Str, camera_name: cameraName });
+
+          // POST to local API proxy which forwards to ngrok URL
+          const response = await fetch("/api/predict", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: payload,
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            console.log("Detection response:", data);
+            // If backend returned detections, flash the frame red briefly
+            const hasDetections = Array.isArray(data?.detections) && data.detections.length > 0;
+            if (hasDetections) {
+              setThreat(true);
+              if (threatTimeoutRef.current) {
+                clearTimeout(threatTimeoutRef.current);
+              }
+              threatTimeoutRef.current = window.setTimeout(() => setThreat(false), 1500);
+            }
+          } else {
+            // Optionally handle error
+            // setError("Detection service unavailable");
+          }
+        } catch (err) {
+          // Optionally handle error
+          // setError("Detection request failed");
+        } finally {
+          inFlightRef.current = false;
+        }
+      }, "image/jpeg");
+    }, 500); // 2fps
+
+    return () => {
+      clearInterval(interval);
+      setIsAutoDetecting(false);
+      if (threatTimeoutRef.current) {
+        clearTimeout(threatTimeoutRef.current);
+        threatTimeoutRef.current = null;
+      }
+    };
+  }, [cameraName, error]);
+
+  const borderClass = threat
+    ? "border-red-500 shadow-red-500/30"
+    : "border-green-500 shadow-green-500/30";
+
   return (
-    <div className="relative bg-black rounded-lg overflow-hidden border-2 border-green-500 shadow-lg shadow-green-500/30 h-full">
+    <div className={`relative bg-black rounded-lg overflow-hidden border-2 ${borderClass} h-full`}>
       {/* Hidden canvas for frame capture */}
       <canvas ref={canvasRef} className="hidden" />
 
@@ -271,8 +358,12 @@ const CCTVFeed: React.FC<CCTVFeedProps> = ({
         style={{ filter: "hue-rotate(90deg) saturate(1.2) brightness(0.9)" }}
       />
 
-      {/* Green tint overlay */}
-      <div className="absolute inset-0 bg-green-500/10 mix-blend-multiply pointer-events-none"></div>
+      {/* Tint overlay: green normally, red when threat */}
+      <div
+        className={`absolute inset-0 mix-blend-multiply pointer-events-none ${
+          threat ? "bg-red-500/20 animate-pulse" : "bg-green-500/10"
+        }`}
+      ></div>
 
       {/* Scanlines effect */}
       <div

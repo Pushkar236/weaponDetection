@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import CCTVFeed, { DetectionData } from "../../components/CCTVFeed";
 import Toast from "../../components/Toast";
 import LogsPanel from "../../components/LogsPanel";
@@ -16,6 +17,7 @@ export interface Camera {
 }
 
 export default function Dashboard() {
+  const searchParams = useSearchParams();
   const [detections, setDetections] = useState<DetectionData[]>([]);
   const [currentToast, setCurrentToast] = useState<DetectionData | null>(null);
   const [showCameraManager, setShowCameraManager] = useState(false);
@@ -35,6 +37,18 @@ export default function Dashboard() {
 
   // Combine default and user cameras
   const allCameras = [...defaultCameras, ...userCameras];
+
+  // Determine which camera index (1-based) should send frames
+  // Priority: URL ?sendIndex= -> env NEXT_PUBLIC_SEND_FRAMES_INDEX -> all active
+  const sendIndexParam = searchParams?.get("sendIndex");
+  const envIndexRaw = process.env.NEXT_PUBLIC_SEND_FRAMES_INDEX;
+  const selectedSendIndex = (() => {
+    const fromParam = sendIndexParam ? parseInt(sendIndexParam, 10) : NaN;
+    if (Number.isFinite(fromParam) && fromParam > 0) return fromParam;
+    const fromEnv = envIndexRaw ? parseInt(envIndexRaw, 10) : NaN;
+    if (Number.isFinite(fromEnv) && fromEnv > 0) return fromEnv;
+    return NaN; // means all active
+  })();
 
   // Load user cameras from localStorage on mount
   useEffect(() => {
@@ -229,6 +243,7 @@ export default function Dashboard() {
                     cameraName={camera.name}
                     camera={camera}
                     onDetection={handleDetection}
+                    active={Number.isFinite(selectedSendIndex) ? index + 1 === selectedSendIndex : true}
                   />
 
                   {/* Enhanced Camera Info Overlay */}
