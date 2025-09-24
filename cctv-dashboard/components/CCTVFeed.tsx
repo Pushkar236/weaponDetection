@@ -10,6 +10,7 @@ export interface DetectionData {
   timestamp: string;
   location: string;
   screenshot: string;
+  severity: "low" | "medium" | "high";
 }
 
 interface CCTVFeedProps {
@@ -18,7 +19,11 @@ interface CCTVFeedProps {
   onDetection: (detection: DetectionData) => void;
 }
 
-const CCTVFeed: React.FC<CCTVFeedProps> = ({ cameraName, camera, onDetection }) => {
+const CCTVFeed: React.FC<CCTVFeedProps> = ({
+  cameraName,
+  camera,
+  onDetection,
+}) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [currentTime, setCurrentTime] = useState<string>("");
@@ -31,41 +36,43 @@ const CCTVFeed: React.FC<CCTVFeedProps> = ({ cameraName, camera, onDetection }) 
     const initWebcam = async () => {
       try {
         let mediaStream: MediaStream;
-        
-        if (camera?.type === 'user') {
+
+        if (camera?.type === "user") {
           // Handle user camera
           if (camera.deviceId) {
             // Access specific camera device with exact constraint
             mediaStream = await navigator.mediaDevices.getUserMedia({
-              video: { 
+              video: {
                 deviceId: { exact: camera.deviceId },
-                width: 640, 
-                height: 480 
+                width: 640,
+                height: 480,
               },
             });
           } else if (camera.url) {
             // Handle URL stream (placeholder - would need additional implementation)
-            console.log('URL streaming not fully implemented yet:', camera.url);
-            setError('URL streaming requires additional setup');
+            console.log("URL streaming not fully implemented yet:", camera.url);
+            setError("URL streaming requires additional setup");
             return;
           } else {
-            throw new Error('Invalid user camera configuration');
+            throw new Error("Invalid user camera configuration");
           }
         } else {
           // Default camera behavior - get available devices and use different ones
           const devices = await navigator.mediaDevices.enumerateDevices();
-          const videoDevices = devices.filter(device => device.kind === 'videoinput');
-          
+          const videoDevices = devices.filter(
+            (device) => device.kind === "videoinput"
+          );
+
           // For default cameras, try to use different devices based on camera index
-          const cameraIndex = parseInt(camera?.id?.split('-')[1] || '1') - 1;
+          const cameraIndex = parseInt(camera?.id?.split("-")[1] || "1") - 1;
           const deviceToUse = videoDevices[cameraIndex % videoDevices.length];
-          
+
           if (deviceToUse && deviceToUse.deviceId) {
             mediaStream = await navigator.mediaDevices.getUserMedia({
-              video: { 
+              video: {
                 deviceId: { exact: deviceToUse.deviceId },
-                width: 640, 
-                height: 480 
+                width: 640,
+                height: 480,
               },
             });
           } else {
@@ -83,7 +90,11 @@ const CCTVFeed: React.FC<CCTVFeedProps> = ({ cameraName, camera, onDetection }) 
         setError("");
       } catch (error) {
         console.error("Error accessing webcam:", error);
-        setError(`Failed to access camera: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        setError(
+          `Failed to access camera: ${
+            error instanceof Error ? error.message : "Unknown error"
+          }`
+        );
       }
     };
 
@@ -177,6 +188,14 @@ const CCTVFeed: React.FC<CCTVFeedProps> = ({ cameraName, camera, onDetection }) 
 
     const screenshot = await captureFrame();
 
+    // Determine severity based on weapon type and confidence
+    const severity: "low" | "medium" | "high" =
+      randomConfidence >= 90
+        ? "high"
+        : randomConfidence >= 75
+        ? "medium"
+        : "low";
+
     const detection: DetectionData = {
       id: Date.now().toString(),
       weaponType: randomWeapon,
@@ -184,6 +203,7 @@ const CCTVFeed: React.FC<CCTVFeedProps> = ({ cameraName, camera, onDetection }) 
       timestamp: new Date().toISOString(),
       location: cameraName,
       screenshot,
+      severity,
     };
 
     // Simulate detection delay
@@ -223,7 +243,7 @@ const CCTVFeed: React.FC<CCTVFeedProps> = ({ cameraName, camera, onDetection }) 
         <div className="flex justify-between items-center text-green-400 font-mono text-sm">
           <div className="bg-black/50 border border-green-500 px-2 py-1 rounded text-xs font-bold">
             {cameraName}
-            {camera?.type === 'user' && (
+            {camera?.type === "user" && (
               <span className="ml-2 text-blue-400">USER</span>
             )}
           </div>
