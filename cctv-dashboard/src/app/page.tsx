@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import CCTVFeed, { DetectionData } from "../../components/CCTVFeed";
 import Toast from "../../components/Toast";
 import LogsPanel from "../../components/LogsPanel";
@@ -35,8 +35,10 @@ export default function Dashboard() {
   const playAlertSound = () => {
     // Create a simple beep sound using Web Audio API
     if (typeof window !== "undefined" && "AudioContext" in window) {
-      const audioContext = new (window.AudioContext ||
-        (window as any).webkitAudioContext)();
+      const audioContext = new (
+        window.AudioContext ||
+        (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext!
+      )();
       const oscillator = audioContext.createOscillator();
       const gainNode = audioContext.createGain();
 
