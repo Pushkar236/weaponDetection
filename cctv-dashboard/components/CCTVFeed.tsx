@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useRef, useState, useEffect } from "react";
+import { Camera } from "../src/app/page";
 
 export interface DetectionData {
   id: string;
@@ -13,29 +14,76 @@ export interface DetectionData {
 
 interface CCTVFeedProps {
   cameraName: string;
+  camera?: Camera;
   onDetection: (detection: DetectionData) => void;
 }
 
-const CCTVFeed: React.FC<CCTVFeedProps> = ({ cameraName, onDetection }) => {
+const CCTVFeed: React.FC<CCTVFeedProps> = ({ cameraName, camera, onDetection }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [currentTime, setCurrentTime] = useState<string>("");
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [isDetecting, setIsDetecting] = useState(false);
+  const [error, setError] = useState<string>("");
 
   // Initialize webcam stream
   useEffect(() => {
     const initWebcam = async () => {
       try {
-        const mediaStream = await navigator.mediaDevices.getUserMedia({
-          video: { width: 640, height: 480 },
-        });
+        let mediaStream: MediaStream;
+        
+        if (camera?.type === 'user') {
+          // Handle user camera
+          if (camera.deviceId) {
+            // Access specific camera device with exact constraint
+            mediaStream = await navigator.mediaDevices.getUserMedia({
+              video: { 
+                deviceId: { exact: camera.deviceId },
+                width: 640, 
+                height: 480 
+              },
+            });
+          } else if (camera.url) {
+            // Handle URL stream (placeholder - would need additional implementation)
+            console.log('URL streaming not fully implemented yet:', camera.url);
+            setError('URL streaming requires additional setup');
+            return;
+          } else {
+            throw new Error('Invalid user camera configuration');
+          }
+        } else {
+          // Default camera behavior - get available devices and use different ones
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          const videoDevices = devices.filter(device => device.kind === 'videoinput');
+          
+          // For default cameras, try to use different devices based on camera index
+          const cameraIndex = parseInt(camera?.id?.split('-')[1] || '1') - 1;
+          const deviceToUse = videoDevices[cameraIndex % videoDevices.length];
+          
+          if (deviceToUse && deviceToUse.deviceId) {
+            mediaStream = await navigator.mediaDevices.getUserMedia({
+              video: { 
+                deviceId: { exact: deviceToUse.deviceId },
+                width: 640, 
+                height: 480 
+              },
+            });
+          } else {
+            // Fallback to default camera
+            mediaStream = await navigator.mediaDevices.getUserMedia({
+              video: { width: 640, height: 480 },
+            });
+          }
+        }
+
         setStream(mediaStream);
         if (videoRef.current) {
           videoRef.current.srcObject = mediaStream;
         }
+        setError("");
       } catch (error) {
         console.error("Error accessing webcam:", error);
+        setError(`Failed to access camera: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
     };
 
@@ -46,7 +94,7 @@ const CCTVFeed: React.FC<CCTVFeedProps> = ({ cameraName, onDetection }) => {
         stream.getTracks().forEach((track) => track.stop());
       }
     };
-  }, []);
+  }, [camera]);
 
   // Update stream when video ref is available
   useEffect(() => {
@@ -175,10 +223,24 @@ const CCTVFeed: React.FC<CCTVFeedProps> = ({ cameraName, onDetection }) => {
         <div className="flex justify-between items-center text-green-400 font-mono text-sm">
           <div className="bg-black/50 border border-green-500 px-2 py-1 rounded text-xs font-bold">
             {cameraName}
+            {camera?.type === 'user' && (
+              <span className="ml-2 text-blue-400">USER</span>
+            )}
           </div>
           <div className="text-xs">{currentTime}</div>
         </div>
       </div>
+
+      {/* Error overlay */}
+      {error && (
+        <div className="absolute inset-0 bg-black/80 flex items-center justify-center z-30">
+          <div className="bg-red-900/80 border-2 border-red-500 text-red-400 px-6 py-4 rounded font-mono text-center">
+            <div className="text-2xl mb-2">❌</div>
+            <div className="text-sm font-bold">CAMERA ERROR</div>
+            <div className="text-xs">{error}</div>
+          </div>
+        </div>
+      )}
 
       {/* Video element */}
       <video
