@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import CCTVFeed, { DetectionData } from "../../components/CCTVFeed";
 import Toast from "../../components/Toast";
 import LogsPanel from "../../components/LogsPanel";
