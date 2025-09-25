@@ -32,10 +32,32 @@ const CCTVFeed: React.FC<CCTVFeedProps> = ({
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [isDetecting, setIsDetecting] = useState(false);
   const [error, setError] = useState<string>("");
-  const [isAutoDetecting, setIsAutoDetecting] = useState(false);
-  const inFlightRef = useRef(false);
-  const [threat, setThreat] = useState(false);
-  const threatTimeoutRef = useRef<number | null>(null);
+  const [aiServerStatus, setAiServerStatus] = useState<
+    "unknown" | "healthy" | "unhealthy"
+  >("unknown");
+  const [currentModel, setCurrentModel] = useState<"best" | "last">("best");
+  const [lastDetectionCount, setLastDetectionCount] = useState<number>(0);
+
+  // Check AI server status on component mount
+  useEffect(() => {
+    const checkAiServerStatus = async () => {
+      try {
+        const response = await fetch("/api/ai-detect");
+        if (response.ok) {
+          setAiServerStatus("healthy");
+        } else {
+          setAiServerStatus("unhealthy");
+        }
+      } catch (error) {
+        setAiServerStatus("unhealthy");
+      }
+    };
+
+    checkAiServerStatus();
+    // Check status every 30 seconds
+    const interval = setInterval(checkAiServerStatus, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Initialize webcam stream
   useEffect(() => {
@@ -64,24 +86,54 @@ const CCTVFeed: React.FC<CCTVFeedProps> = ({
           }
         } else {
           // Default camera behavior - get available devices and use different ones
-          const devices = await navigator.mediaDevices.enumerateDevices();
-          const videoDevices = devices.filter(
-            (device) => device.kind === "videoinput"
-          );
+          try {
+            // Check if mediaDevices is supported
+            if (
+              !navigator.mediaDevices ||
+              !navigator.mediaDevices.enumerateDevices
+            ) {
+              console.warn(
+                "enumerateDevices not supported, using default camera"
+              );
+              // Use default camera constraints
+              const defaultStream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: "user" },
+              });
+              setStream(defaultStream);
+              if (videoRef.current) {
+                videoRef.current.srcObject = defaultStream;
+              }
+              return;
+            }
 
-          // For default cameras, try to use different devices based on camera index
-          const cameraIndex = parseInt(camera?.id?.split("-")[1] || "1") - 1;
-          const deviceToUse = videoDevices[cameraIndex % videoDevices.length];
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const videoDevices = devices.filter(
+              (device) => device.kind === "videoinput"
+            );
 
-          if (deviceToUse && deviceToUse.deviceId) {
-            mediaStream = await navigator.mediaDevices.getUserMedia({
-              video: {
-                deviceId: { exact: deviceToUse.deviceId },
-                width: 640,
-                height: 480,
-              },
-            });
-          } else {
+            // For default cameras, try to use different devices based on camera index
+            const cameraIndex = parseInt(camera?.id?.split("-")[1] || "1") - 1;
+            const deviceToUse = videoDevices[cameraIndex % videoDevices.length];
+
+            if (deviceToUse && deviceToUse.deviceId) {
+              mediaStream = await navigator.mediaDevices.getUserMedia({
+                video: {
+                  deviceId: { exact: deviceToUse.deviceId },
+                  width: 640,
+                  height: 480,
+                },
+              });
+            } else {
+              // Fallback to default camera
+              mediaStream = await navigator.mediaDevices.getUserMedia({
+                video: { width: 640, height: 480 },
+              });
+            }
+          } catch (enumerateError) {
+            console.warn(
+              "Failed to enumerate devices, using default camera:",
+              enumerateError
+            );
             // Fallback to default camera
             mediaStream = await navigator.mediaDevices.getUserMedia({
               video: { width: 640, height: 480 },
@@ -174,6 +226,93 @@ const CCTVFeed: React.FC<CCTVFeedProps> = ({
     });
   };
 
+  const performAiDetection = async () => {
+    if (isDetecting) return;
+    setIsDetecting(true);
+
+    try {
+      // Capture current frame
+      const screenshot = await captureFrame();
+
+      if (!screenshot) {
+        throw new Error("Failed to capture frame");
+      }
+
+      console.log("🤖 Sending frame to AI detection server...");
+
+      // Send frame to AI detection API
+      const response = await fetch("/api/ai-detect", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          image: screenshot,
+          model: currentModel, // Use selected model
+          confidence: 0.3, // Lower confidence threshold for more sensitive detection
+        }),
+      });
+
+      const result = await response.json();
+
+      if (result.success && result.detections && result.detections.length > 0) {
+        console.log(
+          `✅ AI Detection successful: Found ${result.detections.length} weapons`
+        );
+        setLastDetectionCount(result.detections.length);
+
+        // Process each detection
+        result.detections.forEach((detection: any, index: number) => {
+          const confidence = Math.round(detection.confidence * 100);
+
+          // Determine severity based on confidence and weapon type
+          const severity: "low" | "medium" | "high" =
+            confidence >= 90 ? "high" : confidence >= 75 ? "medium" : "low";
+
+          const detectionData: DetectionData = {
+            id: `${Date.now()}-${index}`,
+            weaponType: detection.class || "Unknown Weapon",
+            confidence: confidence,
+            timestamp: new Date().toISOString(),
+            location: cameraName,
+            screenshot: result.annotated_image || screenshot, // Use annotated image if available
+            severity,
+          };
+
+          onDetection(detectionData);
+
+          // Log detection details
+          console.log(
+            `🎯 Weapon detected: ${detectionData.weaponType} (${confidence}% confidence)`
+          );
+        });
+      } else if (result.success) {
+        console.log("✅ AI scan complete - No weapons detected");
+        setLastDetectionCount(0);
+      } else {
+        throw new Error(result.error || "AI detection failed");
+      }
+    } catch (error) {
+      console.error("❌ AI detection failed:", error);
+
+      // Show user-friendly error
+      if (error instanceof Error) {
+        if (error.message.includes("server is not running")) {
+          setError(
+            "AI Detection Server offline. Please start the Python server."
+          );
+        } else {
+          setError(`AI Detection error: ${error.message}`);
+        }
+      }
+
+      // Clear error after 5 seconds
+      setTimeout(() => setError(""), 5000);
+    } finally {
+      setIsDetecting(false);
+    }
+  };
+
   const simulateDetection = async () => {
     if (isDetecting) return;
 
@@ -239,99 +378,62 @@ const CCTVFeed: React.FC<CCTVFeedProps> = ({
     }
   };
 
-  // --- 2fps automatic detection logic (only CAM-03 sends frames) ---
-  useEffect(() => {
-    // Only proceed for the camera named CAM-03 and when no error is present
-    if (error || cameraName !== "CAM-03") return;
-    setIsAutoDetecting(true);
-
-    const interval = setInterval(async () => {
-      if (inFlightRef.current || !videoRef.current || !canvasRef.current) return;
-      inFlightRef.current = true;
-
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) {
-        inFlightRef.current = false;
-        return;
-      }
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      ctx.drawImage(video, 0, 0);
-
-      canvas.toBlob(async (blob) => {
-        if (!blob) {
-          inFlightRef.current = false;
-          return;
-        }
-        try {
-          // Convert Blob to ArrayBuffer, then to base64 (browser-safe)
-          const arrayBuffer = await blob.arrayBuffer();
-          const base64Str = btoa(
-            new Uint8Array(arrayBuffer)
-              .reduce((data, byte) => data + String.fromCharCode(byte), "")
-          );
-          const payload = JSON.stringify({ image_base64: base64Str, camera_name: cameraName });
-
-          // POST to local API proxy which forwards to ngrok URL
-          const response = await fetch("/api/predict", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: payload,
-          });
-
-          if (response.ok) {
-            const data = await response.json();
-            console.log("Detection response:", data);
-            // If backend returned detections, flash the frame red briefly
-            const hasDetections = Array.isArray(data?.detections) && data.detections.length > 0;
-            if (hasDetections) {
-              setThreat(true);
-              if (threatTimeoutRef.current) {
-                clearTimeout(threatTimeoutRef.current);
-              }
-              threatTimeoutRef.current = window.setTimeout(() => setThreat(false), 1500);
-            }
-          } else {
-            // Optionally handle error
-            // setError("Detection service unavailable");
-          }
-        } catch (err) {
-          // Optionally handle error
-          // setError("Detection request failed");
-        } finally {
-          inFlightRef.current = false;
-        }
-      }, "image/jpeg");
-    }, 500); // 2fps
-
-    return () => {
-      clearInterval(interval);
-      setIsAutoDetecting(false);
-      if (threatTimeoutRef.current) {
-        clearTimeout(threatTimeoutRef.current);
-        threatTimeoutRef.current = null;
-      }
-    };
-  }, [cameraName, error]);
-
-  const borderClass = threat
-    ? "border-red-500 shadow-red-500/30"
-    : "border-green-500 shadow-green-500/30";
-
   return (
-    <div className={`relative bg-black rounded-lg overflow-hidden border-2 ${borderClass} h-full`}>
+    <div className="relative bg-black rounded-lg overflow-hidden border-2 border-green-500 shadow-lg shadow-green-500/30 h-full">
       {/* Hidden canvas for frame capture */}
       <canvas ref={canvasRef} className="hidden" />
 
       {/* Top bar overlay */}
       <div className="absolute top-0 left-0 right-0 z-20 bg-gradient-to-b from-black/80 via-black/40 to-transparent p-3">
         <div className="flex justify-between items-center text-green-400 font-mono text-sm">
-          <div className="bg-black/50 border border-green-500 px-2 py-1 rounded text-xs font-bold">
-            {cameraName}
-            {camera?.type === "user" && (
-              <span className="ml-2 text-blue-400">USER</span>
+          <div className="flex items-center gap-2">
+            <div className="bg-black/50 border border-green-500 px-2 py-1 rounded text-xs font-bold">
+              {cameraName}
+              {camera?.type === "user" && (
+                <span className="ml-2 text-blue-400">USER</span>
+              )}
+            </div>
+            {/* AI Server Status Indicator */}
+            <div
+              className={`flex items-center gap-1 px-2 py-1 rounded text-xs border ${
+                aiServerStatus === "healthy"
+                  ? "bg-green-900/50 border-green-500 text-green-400"
+                  : aiServerStatus === "unhealthy"
+                  ? "bg-red-900/50 border-red-500 text-red-400"
+                  : "bg-yellow-900/50 border-yellow-500 text-yellow-400"
+              }`}
+            >
+              <div
+                className={`w-2 h-2 rounded-full ${
+                  aiServerStatus === "healthy"
+                    ? "bg-green-400"
+                    : aiServerStatus === "unhealthy"
+                    ? "bg-red-400"
+                    : "bg-yellow-400"
+                }`}
+              ></div>
+              <span>AI</span>
+            </div>
+            {/* Model Selector */}
+            <div className="flex items-center gap-1 px-2 py-1 rounded text-xs border bg-black/50 border-blue-500 text-blue-400">
+              <span className="text-[10px]">MODEL:</span>
+              <button
+                onClick={() =>
+                  setCurrentModel(currentModel === "best" ? "last" : "best")
+                }
+                className="text-[10px] font-bold hover:text-white transition-colors"
+              >
+                {currentModel.toUpperCase()}
+              </button>
+            </div>
+            {/* Detection Counter */}
+            {lastDetectionCount > 0 && (
+              <div className="flex items-center gap-1 px-2 py-1 rounded text-xs border bg-red-900/50 border-red-500 text-red-400">
+                <span className="text-[10px]">DETECTED:</span>
+                <span className="text-[10px] font-bold">
+                  {lastDetectionCount}
+                </span>
+              </div>
             )}
           </div>
           <div className="text-xs">{currentTime}</div>
@@ -387,6 +489,24 @@ const CCTVFeed: React.FC<CCTVFeedProps> = ({
           className="bg-black/80 border border-green-500 text-green-400 px-3 py-1 rounded text-xs font-mono hover:bg-green-500/20 transition-colors"
         >
           📸 SAVE
+        </button>
+        <button
+          onClick={performAiDetection}
+          disabled={isDetecting || aiServerStatus !== "healthy"}
+          className={`border px-3 py-1 rounded text-xs font-mono transition-colors ${
+            isDetecting
+              ? "bg-red-600/80 border-red-500 text-red-200 cursor-not-allowed"
+              : aiServerStatus === "healthy"
+              ? "bg-black/80 border-blue-500 text-blue-400 hover:bg-blue-500/20"
+              : "bg-black/80 border-gray-500 text-gray-400 cursor-not-allowed"
+          }`}
+          title={
+            aiServerStatus !== "healthy"
+              ? "AI Server offline"
+              : "Run AI weapon detection"
+          }
+        >
+          {isDetecting ? "🤖 AI DETECTING..." : "🧠 AI DETECT"}
         </button>
         <button
           onClick={simulateDetection}
