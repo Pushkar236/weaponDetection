@@ -368,6 +368,7 @@ export default function Dashboard() {
                         ? index + 1 === selectedSendIndex
                         : true
                     }
+                    notifyEmail="parth.joshi23@pccoepune.org"
                   />
 
                   {/* Enhanced Camera Info Overlay */}

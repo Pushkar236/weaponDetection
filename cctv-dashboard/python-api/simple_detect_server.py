@@ -38,7 +38,7 @@ def load_models():
     
     try:
         # Path to your models
-        model_dir = r'c:\Users\pdkir\OneDrive\Desktop\DRDO VIT\weaponDetection\cctv-dashboard\Model'
+        model_dir = r'./../Model'
         best_model_path = os.path.join(model_dir, 'best.pt')
         last_model_path = os.path.join(model_dir, 'last.pt')
         

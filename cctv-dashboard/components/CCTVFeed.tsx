@@ -18,6 +18,7 @@ interface CCTVFeedProps {
   camera?: Camera;
   onDetection: (detection: DetectionData) => void;
   active?: boolean; // Only send frames if true
+  notifyEmail?: string; // recipient email for alerts
 }
 
 const CCTVFeed: React.FC<CCTVFeedProps> = ({
@@ -25,6 +26,7 @@ const CCTVFeed: React.FC<CCTVFeedProps> = ({
   camera,
   onDetection,
   active = false,
+  notifyEmail, // added
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -40,6 +42,69 @@ const CCTVFeed: React.FC<CCTVFeedProps> = ({
   const [isContinuousDetection, setIsContinuousDetection] = useState(false);
   const [isInitialAnalyzing, setIsInitialAnalyzing] = useState(false);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+
+// Email throttling and detection-edge tracking
+  const lastEmailSentAtRef = useRef<number>(0);
+  const emailCooldownMs = 60_000; // 60s
+  const detectionActiveRef = useRef<boolean>(false); // true while we keep detecting
+  const lastSeverityRef = useRef<DetectionData["severity"] | null>(null);
+
+  // Thresholds (tune as needed)
+  const minEmailConfidence = 75; // don't email for very low confidence unless severity escalates
+
+  const severityRank = (s: DetectionData["severity"]) =>
+    s === "high" ? 3 : s === "medium" ? 2 : 1;
+
+  // Decide if we should notify for this detection, considering edges, thresholds, and cooldown
+  const shouldSendEmail = (d: DetectionData) => {
+    // Skip low-confidence, low-severity noise
+    // if (d.severity === "low" && d.confidence < minEmailConfidence)
+    //   return { send: false, force: false };
+
+    const prevActive = detectionActiveRef.current;
+    const prevSeverity = lastSeverityRef.current;
+
+    // Rising edge: previously no detection, now we have one
+    if (!prevActive) {
+      return { send: true, force: d.severity === "high" };
+    }
+
+    // Escalation edge: severity increased (low->medium/high or medium->high)
+    if (prevSeverity && severityRank(d.severity) > severityRank(prevSeverity)) {
+      return { send: true, force: d.severity === "high" };
+    }
+
+    // Otherwise, don't resend within the same active window
+    return { send: false, force: false };
+  };
+
+  // Send email via server API (keeps credentials server-side)
+  const sendEmailAlert = async (d: DetectionData, p0: { force: boolean; }) => {
+    if (!notifyEmail) return;
+    if (Date.now() - lastEmailSentAtRef.current < emailCooldownMs) return;
+
+    try {
+  await fetch("/api/send-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to: notifyEmail,
+          cameraName,
+          location: d.location,
+          timestamp: d.timestamp,
+          weaponType: d.weaponType,
+          confidence: d.confidence,
+          severity: d.severity,
+          image: d.screenshot, // data URL (base64)
+          id: d.id,
+        }),
+      });
+      lastEmailSentAtRef.current = Date.now();
+      console.log("📧 Email alert requested.");
+    } catch (e) {
+      console.error("Email alert failed:", e);
+    }
+  };
 
   // Check AI server status on component mount
   useEffect(() => {
@@ -264,34 +329,63 @@ const CCTVFeed: React.FC<CCTVFeedProps> = ({
         );
         setLastDetectionCount(result.detections.length);
 
-        // Process each detection
+        // Track the best detection (highest severity then confidence)
+        let topDetection: DetectionData | null = null;
+
         result.detections.forEach((detection: any, index: number) => {
           const confidence = Math.round(detection.confidence * 100);
-
-          // Determine severity based on confidence and weapon type
           const severity: "low" | "medium" | "high" =
             confidence >= 90 ? "high" : confidence >= 75 ? "medium" : "low";
 
           const detectionData: DetectionData = {
             id: `${Date.now()}-${index}`,
             weaponType: detection.class || "Unknown Weapon",
-            confidence: confidence,
+            confidence,
             timestamp: new Date().toISOString(),
             location: cameraName,
-            screenshot: result.annotated_image || screenshot, // Use annotated image if available
+            screenshot: result.annotated_image || screenshot,
             severity,
           };
 
           onDetection(detectionData);
 
-          // Log detection details
+          // Pick top detection by severity, then confidence
+          if (!topDetection) {
+            topDetection = detectionData;
+          } else {
+            const curr = detectionData;
+            if (
+              severityRank(curr.severity) > severityRank(topDetection.severity) ||
+              (severityRank(curr.severity) === severityRank(topDetection.severity) &&
+                curr.confidence > topDetection.confidence)
+            ) {
+              topDetection = curr;
+            }
+          }
+
           console.log(
             `🎯 Weapon detected: ${detectionData.weaponType} (${confidence}% confidence)`
           );
         });
+
+        // After processing, decide email for the best detection
+        if (topDetection && notifyEmail) {
+          const td = topDetection as DetectionData;
+          console.log(`📧 Deciding email for detection id=${td.id}`);
+          // const decision = shouldSendEmail(td);
+          // if (decision.send) {
+            await sendEmailAlert(td, { force: true });
+          // }
+          // Mark active window and update last severity seen
+          detectionActiveRef.current = true;
+          lastSeverityRef.current = td.severity;
+        }
       } else if (result.success) {
         console.log("✅ AI scan complete - No weapons detected");
         setLastDetectionCount(0);
+        // Reset active window so next detection becomes a rising edge
+        detectionActiveRef.current = false;
+        lastSeverityRef.current = null;
       } else {
         throw new Error(result.error || "AI detection failed");
       }
@@ -365,7 +459,6 @@ const CCTVFeed: React.FC<CCTVFeedProps> = ({
 
   const simulateDetection = async () => {
     if (isDetecting) return;
-
     setIsDetecting(true);
 
     const weaponTypes = [
@@ -383,13 +476,8 @@ const CCTVFeed: React.FC<CCTVFeedProps> = ({
 
     const screenshot = await captureFrame();
 
-    // Determine severity based on weapon type and confidence
     const severity: "low" | "medium" | "high" =
-      randomConfidence >= 90
-        ? "high"
-        : randomConfidence >= 75
-        ? "medium"
-        : "low";
+      randomConfidence >= 90 ? "high" : randomConfidence >= 75 ? "medium" : "low";
 
     const detection: DetectionData = {
       id: Date.now().toString(),
@@ -401,12 +489,18 @@ const CCTVFeed: React.FC<CCTVFeedProps> = ({
       severity,
     };
 
-    // Simulate detection delay
-    setTimeout(() => {
+    setTimeout(async () => {
       onDetection(detection);
-      setIsDetecting(false);
 
-      // Console logs for webhook and email simulation
+      // Email decision same as real flow
+      const decision = shouldSendEmail(detection);
+      if (notifyEmail && decision.send) {
+        await sendEmailAlert(detection, { force: decision.force });
+      }
+      detectionActiveRef.current = true;
+      lastSeverityRef.current = detection.severity;
+
+      setIsDetecting(false);
       console.log(
         `🚨 WEAPON DETECTED - Webhook URL: https://api.security-system.com/webhook/${detection.id}`
       );
@@ -602,5 +696,7 @@ const CCTVFeed: React.FC<CCTVFeedProps> = ({
     </div>
   );
 };
+
+
 
 export default CCTVFeed;
