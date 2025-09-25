@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import GalleryPage from "./Gallery";
 
 interface DetectionData {
   id: string;
@@ -75,14 +76,9 @@ const LogsPanel: React.FC<LogsPanelProps> = ({
               Real-time security alerts
             </p>
           </div>
-          <button
-            onClick={onGalleryClick}
-            className="bg-black/40 backdrop-blur-lg border border-white/20 shadow-lg text-gray-300 px-3 py-2 rounded-lg font-mono text-xs hover:bg-white/10 hover:border-white/30 transition-all duration-300 transform hover:scale-105"
-            title="View Gallery"
-          >
-            🖼️ GALLERY
-          </button>
         </div>
+
+        {/* <button onClick={() => <GalleryPage detections={detections} onBack={() => {}} />}>Click</button> */}
 
         {/* Stats Summary */}
         <div className="grid grid-cols-3 gap-2 text-xs font-mono mb-3">

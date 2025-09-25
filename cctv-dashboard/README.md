@@ -1,36 +1,109 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# CCTV Dashboard - Weapon Detection System
 
-## Getting Started
+A real-time weapon detection system using CCTV cameras powered by machine learning and computer vision technologies.
 
-First, run the development server:
+## Features
 
+- Real-time video stream monitoring
+- AI-powered weapon detection
+- Alert system for detected threats
+- Dashboard interface for monitoring multiple cameras
+- Historical data and analytics
+- User authentication and access control
+
+## Technology Stack
+
+- **Frontend**: React.js/Vue.js with responsive design
+- **Backend**: Node.js/Python with REST API
+- **Machine Learning**: TensorFlow/PyTorch for weapon detection models
+- **Database**: MongoDB/PostgreSQL for data storage
+- **Real-time Communication**: WebSockets for live updates
+- **Video Processing**: OpenCV for computer vision tasks
+
+## Prerequisites
+
+- Node.js (v14 or higher)
+- Python (v3.8 or higher)
+- MongoDB/PostgreSQL
+- CUDA-compatible GPU (recommended for AI processing)
+
+## Installation
+
+1. Clone the repository:
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+git clone <repository-url>
+cd cctv-dashboard
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+2. Install frontend dependencies:
+```bash
+npm install
+```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+3. Install Python dependencies:
+```bash
+pip install -r requirements.txt
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+4. Set up environment variables:
+```bash
+cp .env.example .env
+# Edit .env with your configuration
+```
 
-## Learn More
+5. Initialize the database:
+```bash
+npm run db:migrate
+```
 
-To learn more about Next.js, take a look at the following resources:
+## Usage
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+1. Start the backend server:
+```bash
+npm run server
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+2. Start the AI detection service:
+```bash
+python detection_service.py
+```
 
-## Deploy on Vercel
+3. Launch the dashboard:
+```bash
+npm start
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+4. Access the dashboard at `http://localhost:3000`
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Configuration
+
+- Configure camera endpoints in `config/cameras.json`
+- Adjust detection sensitivity in `config/detection.json`
+- Set up alert notifications in `config/alerts.json`
+
+## API Endpoints
+
+- `GET /api/cameras` - List all cameras
+- `POST /api/cameras` - Add new camera
+- `GET /api/alerts` - Get alert history
+- `WebSocket /ws/live` - Live detection feed
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Security Notice
+
+This system is designed for security purposes. Please ensure compliance with local privacy laws and regulations when deploying CCTV monitoring systems.
+
+## Support
+
+For issues and questions, please open an issue on GitHub or contact the development team.
