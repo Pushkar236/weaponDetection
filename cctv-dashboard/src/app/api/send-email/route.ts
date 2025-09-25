@@ -1,5 +1,38 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sendDetectionAlertFromPayload } from "../../../mailjetMailer.js";
+import { MongoClient, Db} from "mongodb";
+
+// MongoDB connection
+const MONGODB_URI = process.env.MONGODB_URI || "mongodb://localhost:27017";
+const DB_NAME = process.env.DB_NAME || "weapon_detection";
+let db: Db | null = null;
+
+async function connectToMongoDB(): Promise<Db> {
+  if (db) return db;
+  
+  const client = new MongoClient(MONGODB_URI);
+  await client.connect();
+  db = client.db(DB_NAME);
+  return db;
+}
+
+interface DetectionAlert {
+  _id?: string;
+  to: string;
+  cameraName: string;
+  location?: string;
+  timestamp?: string | number;
+  weaponType?: string;
+  confidence?: number;
+  severity?: Severity;
+  image: string;
+  detectionId: string;
+  emailSent: boolean;
+  suppressed?: boolean;
+  suppressReason?: string;
+  createdAt: Date;
+}
+
 // Email policy config and in-memory state
 const NOTIFIED_TTL_MS = 10 * 60_000;       // dedupe window by detection id
 
@@ -35,7 +68,7 @@ export async function POST(request: NextRequest) {
       severity,
       id,
     } = body;
-
+    
     // Support both `image` and legacy `screenshot`
     const image = body.image || body.screenshot;
 
@@ -105,15 +138,40 @@ export async function POST(request: NextRequest) {
         // bbox: { x, y, width, height },
         // subject: `[${(severity || '').toUpperCase()}] Alert: ${weaponType || 'Weapon'} on ${cameraName}`,
       }
-    );
-
-    // Update state
+    );    // Update state
     lastEmailAtByKey.set(key, now);
     notifiedIdTs.set(normalizedId, now);
 
+    // Store in MongoDB
+    try {
+      const database = await connectToMongoDB();
+      const alertsCollection = database.collection<DetectionAlert>("detection_alerts");
+      
+      const alertDocument: DetectionAlert = {
+        to,
+        cameraName,
+        location,
+        timestamp,
+        weaponType,
+        confidence,
+        severity: severity as Severity,
+        image,
+        detectionId: normalizedId,
+        emailSent: true,
+        suppressed: false,
+        createdAt: new Date(),
+      };
+
+      await alertsCollection.insertOne(alertDocument);
+      console.log("✅ Detection alert stored in MongoDB:", normalizedId);
+    } catch (dbError) {
+      console.error("❌ Failed to store in MongoDB:", dbError);
+      // Don't fail the request if DB storage fails, email was already sent
+    }
+
     return NextResponse.json({
       success: true,
-      message: "Email sent via Mailjet",
+      message: "Email sent via Mailjet and stored in database",
       result,
     });
   } catch (error) {
