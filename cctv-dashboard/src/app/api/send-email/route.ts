@@ -3,7 +3,6 @@ import { sendDetectionAlertFromPayload } from "../../../mailjetMailer.js";
 // Email policy config and in-memory state
 const EMAIL_COOLDOWN_MS = 60_000;          // per (to, cameraName)
 const NOTIFIED_TTL_MS = 10 * 60_000;       // dedupe window by detection id
-const MIN_CONFIDENCE_LOW = 75;             // for severity "low"
 
 type Severity = "low" | "medium" | "high";
 
