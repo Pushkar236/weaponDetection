@@ -1,16 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sendDetectionAlertFromPayload } from "../../../mailjetMailer.js";
 // Email policy config and in-memory state
-const EMAIL_COOLDOWN_MS = 60_000;          // per (to, cameraName)
 const NOTIFIED_TTL_MS = 10 * 60_000;       // dedupe window by detection id
-const MIN_CONFIDENCE_LOW = 75;             // for severity "low"
 
 type Severity = "low" | "medium" | "high";
 
 const lastEmailAtByKey = new Map<string, number>(); // key: `${to}::${cameraName}`
 const notifiedIdTs = new Map<string, number>();     // id -> timestamp sent
 
-const sevRank = (s?: Severity) => (s === "high" ? 3 : s === "medium" ? 2 : 1);
 
 function pruneNotified(now: number) {
   for (const [id, ts] of notifiedIdTs) {
@@ -54,10 +51,6 @@ export async function POST(request: NextRequest) {
 
     const normalizedId: string = id || `${cameraName}-${timestamp || now}`;
     const key = `${to}::${cameraName}`;
-    const lastSentAt = lastEmailAtByKey.get(key) || 0;
-    const underCooldown = now - lastSentAt < EMAIL_COOLDOWN_MS;
-    const rank = sevRank(severity as Severity);
-    const forceBypass = rank === 3; // high severity bypasses cooldown
 
     // Deduplicate by detection id within TTL
     if (notifiedIdTs.has(normalizedId)) {
@@ -81,16 +74,6 @@ export async function POST(request: NextRequest) {
     //   });
     // }
 
-    // Cooldown unless forced by high severity
-    if (underCooldown && !forceBypass) {
-      return NextResponse.json({
-        success: true,
-        suppressed: true,
-        reason: "cooldown",
-        retryAfterMs: EMAIL_COOLDOWN_MS - (now - lastSentAt),
-        message: "Suppressed by cooldown",
-      });
-    }
 
     // // Dynamically import the mailer (ESM-safe) and support both named/default exports
     // const mod = await import("../../../mailjetMailer.js");
