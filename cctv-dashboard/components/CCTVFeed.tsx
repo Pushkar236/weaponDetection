@@ -131,11 +131,9 @@ const CCTVFeed: React.FC<CCTVFeedProps> = ({
   useEffect(() => {
     const initWebcam = async () => {
       try {
-        let mediaStream: MediaStream;
-
-        if (camera?.type === "user") {
-          // Handle user camera
-          if (camera.deviceId) {
+        let mediaStream: MediaStream;        if (camera?.type === "user") {
+          // Handle user camera based on input type
+          if (camera.inputType === "webcam" && camera.deviceId) {
             // Access specific camera device with exact constraint
             mediaStream = await navigator.mediaDevices.getUserMedia({
               video: {
@@ -144,11 +142,33 @@ const CCTVFeed: React.FC<CCTVFeedProps> = ({
                 height: 480,
               },
             });
-          } else if (camera.url) {
-            // Handle URL stream (placeholder - would need additional implementation)
-            console.log("URL streaming not fully implemented yet:", camera.url);
-            setError("URL streaming requires additional setup");
-            return;
+          } else if ((camera.inputType === "url" || camera.inputType === "rtsp") && camera.url) {
+            // Handle URL/RTSP streams
+            console.log(`Setting up ${camera.inputType.toUpperCase()} stream:`, camera.url);
+            
+            // For URL/RTSP streams, we'll create a video element that loads the stream directly
+            if (videoRef.current) {
+              videoRef.current.src = camera.url;
+              videoRef.current.load();
+              
+              // Handle video events              const streamType = camera.inputType?.toUpperCase() || "STREAM";
+              
+              videoRef.current.onloadstart = () => {
+                console.log(`${streamType} stream loading...`);
+                setError("");
+              };
+              
+              videoRef.current.onloadeddata = () => {
+                console.log(`${streamType} stream loaded successfully`);
+                setError("");
+              };
+              
+              videoRef.current.onerror = (e) => {
+                console.error(`${streamType} stream error:`, e);
+                setError(`Failed to load ${streamType} stream: ${camera.url}`);
+              };
+            }
+            return; // Exit early for URL/RTSP streams
           } else {
             throw new Error("Invalid user camera configuration");
           }

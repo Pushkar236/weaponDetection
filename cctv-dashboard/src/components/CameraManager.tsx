@@ -20,7 +20,7 @@ export default function CameraManager({
   const [selectedDevice, setSelectedDevice] = useState<string>("");
   const [cameraName, setCameraName] = useState<string>("");
   const [cameraUrl, setCameraUrl] = useState<string>("");
-  const [inputMethod, setInputMethod] = useState<'device' | 'url'>('device');
+  const [inputMethod, setInputMethod] = useState<'device' | 'url' | 'rtsp'>('device');
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -50,19 +50,17 @@ export default function CameraManager({
     if (inputMethod === 'device' && !selectedDevice) {
       alert('Please select a camera device');
       return;
-    }
-
-    if (inputMethod === 'url' && !cameraUrl.trim()) {
+    }    if ((inputMethod === 'url' || inputMethod === 'rtsp') && !cameraUrl.trim()) {
       alert('Please enter a camera URL');
       return;
     }
 
     setLoading(true);
 
-    try {
-      const newCamera: Omit<Camera, 'id'> = {
+    try {      const newCamera: Omit<Camera, 'id'> = {
         name: cameraName,
         type: 'user',
+        inputType: inputMethod === 'device' ? 'webcam' : inputMethod,
         ...(inputMethod === 'device' 
           ? { deviceId: selectedDevice }
           : { url: cameraUrl }
@@ -122,27 +120,36 @@ export default function CameraManager({
           <div className="mb-4">
             <label className="block text-green-400 font-mono text-sm mb-2">
               Camera Source:
-            </label>
-            <div className="flex gap-4">
+            </label>            <div className="flex gap-2 flex-wrap">
               <label className="flex items-center gap-2">
                 <input
                   type="radio"
                   value="device"
                   checked={inputMethod === 'device'}
-                  onChange={(e) => setInputMethod(e.target.value as 'device')}
+                  onChange={(e) => setInputMethod(e.target.value as 'device' | 'url' | 'rtsp')}
                   className="text-green-500"
                 />
-                <span className="text-green-400 font-mono text-sm">System Camera</span>
+                <span className="text-green-400 font-mono text-sm">📹 Webcam</span>
               </label>
               <label className="flex items-center gap-2">
                 <input
                   type="radio"
                   value="url"
                   checked={inputMethod === 'url'}
-                  onChange={(e) => setInputMethod(e.target.value as 'url')}
+                  onChange={(e) => setInputMethod(e.target.value as 'device' | 'url' | 'rtsp')}
                   className="text-green-500"
                 />
-                <span className="text-green-400 font-mono text-sm">Camera URL</span>
+                <span className="text-green-400 font-mono text-sm">🌐 HTTP/URL</span>
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  value="rtsp"
+                  checked={inputMethod === 'rtsp'}
+                  onChange={(e) => setInputMethod(e.target.value as 'device' | 'url' | 'rtsp')}
+                  className="text-green-500"
+                />
+                <span className="text-green-400 font-mono text-sm">📡 RTSP Stream</span>
               </label>
             </div>
           </div>
@@ -166,21 +173,41 @@ export default function CameraManager({
                 ))}
               </select>
             </div>
-          )}
-
-          {/* URL Input */}
+          )}          {/* URL Input */}
           {inputMethod === 'url' && (
             <div className="mb-4">
               <label className="block text-green-400 font-mono text-sm mb-2">
-                Camera URL:
+                HTTP/URL Stream:
               </label>
               <input
                 type="url"
                 value={cameraUrl}
                 onChange={(e) => setCameraUrl(e.target.value)}
-                placeholder="http://example.com/stream or rtsp://..."
+                placeholder="http://example.com/stream.mjpg or http://192.168.1.100:8080/video"
                 className="w-full p-2 bg-gray-800 border border-green-500 text-green-400 font-mono rounded focus:outline-none focus:border-green-300"
               />
+              <div className="text-green-400/60 font-mono text-xs mt-1">
+                Examples: HTTP streams, IP camera URLs, streaming services
+              </div>
+            </div>
+          )}
+
+          {/* RTSP Input */}
+          {inputMethod === 'rtsp' && (
+            <div className="mb-4">
+              <label className="block text-green-400 font-mono text-sm mb-2">
+                RTSP Stream URL:
+              </label>
+              <input
+                type="text"
+                value={cameraUrl}
+                onChange={(e) => setCameraUrl(e.target.value)}
+                placeholder="rtsp://username:password@192.168.1.100:554/stream"
+                className="w-full p-2 bg-gray-800 border border-green-500 text-green-400 font-mono rounded focus:outline-none focus:border-green-300"
+              />
+              <div className="text-green-400/60 font-mono text-xs mt-1">
+                Real-Time Streaming Protocol for IP cameras and surveillance systems
+              </div>
             </div>
           )}
 
@@ -213,9 +240,14 @@ export default function CameraManager({
                   <div>
                     <div className="text-green-400 font-mono font-semibold">
                       {camera.name}
-                    </div>
-                    <div className="text-green-400/70 font-mono text-xs">
-                      {camera.deviceId ? 'System Camera' : 'URL Camera'} • ID: {camera.id}
+                    </div>                    <div className="text-green-400/70 font-mono text-xs">
+                      {camera.inputType === 'webcam' 
+                        ? '📹 Webcam' 
+                        : camera.inputType === 'url'
+                        ? '🌐 HTTP/URL Stream'
+                        : camera.inputType === 'rtsp'
+                        ? '📡 RTSP Stream'
+                        : 'Dynamic Input'} • ID: {camera.id}
                     </div>
                   </div>
                   <button
