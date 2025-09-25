@@ -14,9 +14,23 @@ interface DetectionData {
 
 interface LogsPanelProps {
   detections: DetectionData[];
+  webhookEnabled: boolean;
+  emailEnabled: boolean;
+  isSendingEmail: boolean;
+  onWebhookToggle: () => void;
+  onEmailToggle: () => void;
+  onSendManualEmail: () => void;
 }
 
-const LogsPanel: React.FC<LogsPanelProps> = ({ detections }) => {
+const LogsPanel: React.FC<LogsPanelProps> = ({
+  detections,
+  webhookEnabled,
+  emailEnabled,
+  isSendingEmail,
+  onWebhookToggle,
+  onEmailToggle,
+  onSendManualEmail,
+}) => {
   const formatTime = (timestamp: string) => {
     return new Date(timestamp).toLocaleString();
   };
@@ -64,7 +78,7 @@ const LogsPanel: React.FC<LogsPanelProps> = ({ detections }) => {
         </div>
 
         {/* Stats Summary */}
-        <div className="grid grid-cols-3 gap-2 text-xs font-mono">
+        <div className="grid grid-cols-3 gap-2 text-xs font-mono mb-3">
           <div className="bg-red-500/20 border border-red-500 rounded p-2 text-center">
             <div className="text-red-400 font-bold">
               {detections.filter((d) => d.severity === "high").length}
@@ -83,6 +97,70 @@ const LogsPanel: React.FC<LogsPanelProps> = ({ detections }) => {
             </div>
             <div className="text-blue-400/70">LOW</div>
           </div>
+        </div>
+
+        {/* Notification Controls */}
+        <div className="flex gap-2 text-xs font-mono">
+          <button
+            onClick={onWebhookToggle}
+            className={`flex-1 px-3 py-2 rounded border transition-all duration-200 ${
+              webhookEnabled
+                ? "bg-purple-600/50 border-purple-500 text-purple-200"
+                : "bg-black/50 border-purple-500 text-purple-400 hover:bg-purple-500/20"
+            }`}
+            title={webhookEnabled ? "Disable webhooks" : "Enable webhooks"}
+          >
+            <div className="flex items-center justify-center gap-1">
+              <span>📡</span>
+              <span>{webhookEnabled ? "WEBHOOK ON" : "WEBHOOK"}</span>
+            </div>
+          </button>
+
+          <button
+            onClick={onEmailToggle}
+            className={`flex-1 px-3 py-2 rounded border transition-all duration-200 ${
+              emailEnabled
+                ? "bg-cyan-600/50 border-cyan-500 text-cyan-200"
+                : "bg-black/50 border-cyan-500 text-cyan-400 hover:bg-cyan-500/20"
+            }`}
+            title={emailEnabled ? "Disable auto-emails" : "Enable auto-emails"}
+          >
+            <div className="flex items-center justify-center gap-1">
+              <span>📧</span>
+              <span>{emailEnabled ? "EMAIL ON" : "AUTO EMAIL"}</span>
+            </div>
+          </button>
+
+          <button
+            onClick={onSendManualEmail}
+            disabled={isSendingEmail || detections.length === 0}
+            className={`flex-1 px-3 py-2 rounded border transition-all duration-200 ${
+              isSendingEmail
+                ? "bg-yellow-600/50 border-yellow-500 text-yellow-200 cursor-not-allowed"
+                : detections.length > 0
+                ? "bg-black/50 border-red-500 text-red-400 hover:bg-red-500/20"
+                : "bg-black/50 border-gray-500 text-gray-500 cursor-not-allowed"
+            }`}
+            title={
+              detections.length === 0
+                ? "No detections to report"
+                : "Send manual logs report email"
+            }
+          >
+            <div className="flex items-center justify-center gap-1">
+              {isSendingEmail ? (
+                <>
+                  <span className="animate-spin">📤</span>
+                  <span>SENDING...</span>
+                </>
+              ) : (
+                <>
+                  <span>📤</span>
+                  <span>SEND</span>
+                </>
+              )}
+            </div>
+          </button>
         </div>
       </div>
 
@@ -116,7 +194,7 @@ const LogsPanel: React.FC<LogsPanelProps> = ({ detections }) => {
                       <img
                         src={detection.screenshot}
                         alt="Detection screenshot"
-                        className="w-16 h-12 object-cover rounded border-2 border-green-500/50"
+                        className="w-16 h-12 object-cover rounded border-2 border-gray-400/50"
                       />
                       {/* Severity indicator */}
                       <div
@@ -132,8 +210,8 @@ const LogsPanel: React.FC<LogsPanelProps> = ({ detections }) => {
                       </div>
                     </div>
                   ) : (
-                    <div className="w-16 h-12 bg-gray-800 border-2 border-green-500/50 rounded flex items-center justify-center">
-                      <span className="text-green-400/60 text-xs">📷</span>
+                    <div className="w-16 h-12 bg-gray-800 border-2 border-gray-400/50 rounded flex items-center justify-center">
+                      <span className="text-gray-400/60 text-xs">📷</span>
                     </div>
                   )}
                 </div>

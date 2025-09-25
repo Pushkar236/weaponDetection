@@ -37,6 +37,9 @@ const CCTVFeed: React.FC<CCTVFeedProps> = ({
   >("unknown");
   const [currentModel, setCurrentModel] = useState<"best" | "last">("best");
   const [lastDetectionCount, setLastDetectionCount] = useState<number>(0);
+  const [isContinuousDetection, setIsContinuousDetection] = useState(false);
+  const [isInitialAnalyzing, setIsInitialAnalyzing] = useState(false);
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Check AI server status on component mount
   useEffect(() => {
@@ -309,9 +312,56 @@ const CCTVFeed: React.FC<CCTVFeedProps> = ({
       // Clear error after 5 seconds
       setTimeout(() => setError(""), 5000);
     } finally {
+      // Wait for 2 seconds after getting response before allowing next detection
+      await new Promise((resolve) => setTimeout(resolve, 2000));
       setIsDetecting(false);
     }
   };
+
+  const startContinuousDetection = () => {
+    if (isContinuousDetection || aiServerStatus !== "healthy") return;
+
+    setIsContinuousDetection(true);
+    setIsInitialAnalyzing(true);
+    console.log("🔄 Starting continuous AI detection...");
+
+    // Show "WEAPON DETECTION ANALYZING.." for initial 3 seconds
+    setTimeout(() => {
+      setIsInitialAnalyzing(false);
+    }, 3000);
+
+    // Start with immediate detection
+    performAiDetection();
+
+    // Set up interval for continuous detection (every 3 seconds)
+    intervalRef.current = setInterval(() => {
+      if (!isDetecting) {
+        performAiDetection();
+      }
+    }, 3000);
+  };
+
+  const stopContinuousDetection = () => {
+    if (!isContinuousDetection) return;
+
+    setIsContinuousDetection(false);
+    setIsInitialAnalyzing(false); // Reset initial analyzing state
+    console.log("⏹️ Stopping continuous AI detection...");
+
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+  };
+
+  // Cleanup interval on unmount
+  useEffect(() => {
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
+  }, []);
 
   const simulateDetection = async () => {
     if (isDetecting) return;
@@ -382,7 +432,6 @@ const CCTVFeed: React.FC<CCTVFeedProps> = ({
     <div className="relative bg-black rounded-lg overflow-hidden border-2 border-green-500 shadow-lg shadow-green-500/30 h-full">
       {/* Hidden canvas for frame capture */}
       <canvas ref={canvasRef} className="hidden" />
-
       {/* Top bar overlay */}
       <div className="absolute top-0 left-0 right-0 z-20 bg-gradient-to-b from-black/80 via-black/40 to-transparent p-3">
         <div className="flex justify-between items-center text-green-400 font-mono text-sm">
@@ -414,6 +463,13 @@ const CCTVFeed: React.FC<CCTVFeedProps> = ({
               ></div>
               <span>AI</span>
             </div>
+            {/* Continuous Detection Status */}
+            {isContinuousDetection && (
+              <div className="flex items-center gap-1 px-2 py-1 rounded text-xs border bg-green-900/50 border-green-500 text-green-300">
+                <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse"></div>
+                <span>AUTO</span>
+              </div>
+            )}
             {/* Model Selector */}
             <div className="flex items-center gap-1 px-2 py-1 rounded text-xs border bg-black/50 border-blue-500 text-blue-400">
               <span className="text-[10px]">MODEL:</span>
@@ -439,7 +495,6 @@ const CCTVFeed: React.FC<CCTVFeedProps> = ({
           <div className="text-xs">{currentTime}</div>
         </div>
       </div>
-
       {/* Error overlay */}
       {error && (
         <div className="absolute inset-0 bg-black/80 flex items-center justify-center z-30">
@@ -450,97 +505,99 @@ const CCTVFeed: React.FC<CCTVFeedProps> = ({
           </div>
         </div>
       )}
-
       {/* Video element */}
       <video
         ref={videoRef}
         autoPlay
         muted
         className="w-full h-full object-cover"
-        style={{ filter: "hue-rotate(90deg) saturate(1.2) brightness(0.9)" }}
       />
-
-      {/* Tint overlay: green normally, red when threat */}
-      <div
-        className={`absolute inset-0 mix-blend-multiply pointer-events-none ${
-          threat ? "bg-red-500/20 animate-pulse" : "bg-green-500/10"
-        }`}
-      ></div>
-
-      {/* Scanlines effect */}
-      <div
-        className="absolute inset-0 pointer-events-none opacity-20"
-        style={{
-          background: `repeating-linear-gradient(
-            0deg,
-            transparent,
-            transparent 2px,
-            rgba(0, 255, 0, 0.1) 2px,
-            rgba(0, 255, 0, 0.1) 4px
-          )`,
-          animation: "scanlines 0.1s linear infinite",
-        }}
-      ></div>
-
-      {/* Control buttons */}
+      {/* Detection indicator overlay */}
+      {isDetecting && (
+        <div className="absolute inset-0 bg-blue-500/20 animate-pulse pointer-events-none"></div>
+      )}
+      {/* Control buttons - Clean minimal UI */}
       <div className="absolute bottom-3 right-3 z-20 flex gap-2">
         <button
           onClick={saveFrame}
-          className="bg-black/80 border border-green-500 text-green-400 px-3 py-1 rounded text-xs font-mono hover:bg-green-500/20 transition-colors"
+          className="bg-black/90 border border-green-500 text-green-400 px-2 py-1 rounded text-xs font-mono hover:bg-green-500/20 transition-all duration-200 shadow-md"
+          title="Save screenshot"
         >
-          📸 SAVE
+          📸
         </button>
         <button
-          onClick={performAiDetection}
-          disabled={isDetecting || aiServerStatus !== "healthy"}
-          className={`border px-3 py-1 rounded text-xs font-mono transition-colors ${
-            isDetecting
-              ? "bg-red-600/80 border-red-500 text-red-200 cursor-not-allowed"
+          onClick={
+            isContinuousDetection
+              ? stopContinuousDetection
+              : startContinuousDetection
+          }
+          disabled={
+            (isDetecting && !isContinuousDetection) ||
+            aiServerStatus !== "healthy"
+          }
+          className={`border px-3 py-1 rounded text-xs font-mono transition-all duration-200 shadow-md ${
+            isContinuousDetection
+              ? "bg-red-600/90 border-red-500 text-red-100 hover:bg-red-700/90"
+              : isDetecting
+              ? "bg-yellow-600/90 border-yellow-500 text-yellow-100 cursor-not-allowed"
               : aiServerStatus === "healthy"
-              ? "bg-black/80 border-blue-500 text-blue-400 hover:bg-blue-500/20"
-              : "bg-black/80 border-gray-500 text-gray-400 cursor-not-allowed"
+              ? "bg-black/90 border-green-500 text-green-400 hover:bg-green-500/20"
+              : "bg-black/90 border-gray-500 text-gray-400 cursor-not-allowed"
           }`}
           title={
             aiServerStatus !== "healthy"
               ? "AI Server offline"
-              : "Run AI weapon detection"
+              : isContinuousDetection
+              ? "Stop continuous AI detection"
+              : "Start continuous AI weapon detection"
           }
         >
-          {isDetecting ? "🤖 AI DETECTING..." : "🧠 AI DETECT"}
+          {isContinuousDetection
+            ? "⏹️ STOP"
+            : isDetecting
+            ? "🤖 AI..."
+            : "▶️ START"}
         </button>
         <button
-          onClick={simulateDetection}
-          disabled={isDetecting}
-          className={`border px-3 py-1 rounded text-xs font-mono transition-colors ${
-            isDetecting
-              ? "bg-red-600/80 border-red-500 text-red-200 cursor-not-allowed"
-              : "bg-black/80 border-orange-500 text-orange-400 hover:bg-orange-500/20"
+          onClick={performAiDetection}
+          disabled={
+            isDetecting || isContinuousDetection || aiServerStatus !== "healthy"
+          }
+          className={`border px-2 py-1 rounded text-xs font-mono transition-all duration-200 shadow-md ${
+            isDetecting || isContinuousDetection
+              ? "bg-gray-600/90 border-gray-500 text-gray-400 cursor-not-allowed"
+              : aiServerStatus === "healthy"
+              ? "bg-black/90 border-blue-500 text-blue-400 hover:bg-blue-500/20"
+              : "bg-black/90 border-gray-500 text-gray-400 cursor-not-allowed"
           }`}
+          title={
+            isContinuousDetection
+              ? "Stop continuous mode first"
+              : aiServerStatus !== "healthy"
+              ? "AI Server offline"
+              : "Run single AI weapon detection"
+          }
         >
-          {isDetecting ? "🔍 DETECTING..." : "⚠️ SIMULATE"}
+          🧠
         </button>
-      </div>
-
-      {/* Detection overlay when detecting */}
-      {isDetecting && (
-        <div className="absolute inset-0 bg-red-500/20 flex items-center justify-center z-30">
-          <div className="bg-black/80 border-2 border-red-500 text-red-400 px-6 py-4 rounded font-mono text-center animate-pulse">
-            <div className="text-2xl mb-2">⚠️</div>
-            <div className="text-sm font-bold">WEAPON DETECTION</div>
-            <div className="text-xs">ANALYZING...</div>
+      </div>{" "}
+      {/* Initial analyzing overlay - shown once for 3 seconds when starting continuous detection */}
+      {isInitialAnalyzing && (
+        <div className="absolute inset-0 bg-blue-500/30 flex items-center justify-center z-30">
+          <div className="bg-black/90 border-2 border-blue-400 text-blue-300 px-8 py-6 rounded font-mono text-center">
+            <div className="text-3xl mb-3 animate-spin">🤖</div>
+            <div className="text-lg font-bold tracking-wider">
+              WEAPON DETECTION
+            </div>
+            <div className="text-sm mt-1 animate-pulse">ANALYZING...</div>
+            <div className="text-xs mt-2 text-blue-400">
+              INITIALIZING CONTINUOUS SCAN
+            </div>
           </div>
         </div>
       )}
-
       <style jsx>{`
-        @keyframes scanlines {
-          0% {
-            transform: translateY(0px);
-          }
-          100% {
-            transform: translateY(4px);
-          }
-        }
+        /* Keep styles for component if needed */
       `}</style>
     </div>
   );

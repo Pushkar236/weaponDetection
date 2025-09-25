@@ -23,6 +23,9 @@ export default function Dashboard() {
   const [showCameraManager, setShowCameraManager] = useState(false);
   const [showStatsOverlay, setShowStatsOverlay] = useState(false);
   const [userCameras, setUserCameras] = useState<Camera[]>([]);
+  const [webhookEnabled, setWebhookEnabled] = useState(false);
+  const [emailEnabled, setEmailEnabled] = useState(false);
+  const [isSendingEmail, setIsSendingEmail] = useState(false);
 
   // Default camera feeds
   const cameraCount = 4;
@@ -88,6 +91,16 @@ export default function Dashboard() {
     // Show toast notification
     setCurrentToast(detection);
 
+    // Send webhook notification if enabled
+    if (webhookEnabled) {
+      sendWebhookNotification(detection);
+    }
+
+    // Send email notification if enabled
+    if (emailEnabled) {
+      sendEmailNotification(detection);
+    }
+
     // Play alert sound
     playAlertSound();
 
@@ -124,6 +137,113 @@ export default function Dashboard() {
 
       oscillator.start(audioContext.currentTime);
       oscillator.stop(audioContext.currentTime + 0.3);
+    }
+  };
+
+  const sendWebhookNotification = async (detection: DetectionData) => {
+    try {
+      const webhookPayload = {
+        event: "weapon_detected",
+        timestamp: detection.timestamp,
+        location: detection.location,
+        weaponType: detection.weaponType,
+        confidence: detection.confidence,
+        severity: detection.severity,
+        screenshot: detection.screenshot,
+      };
+
+      // Example webhook URLs - replace with your actual webhooks
+      const webhookUrls: string[] = [
+        // "https://your-discord-webhook.com/api/webhooks/...",
+        // "https://your-slack-webhook.com/services/...",
+      ];
+
+      for (const url of webhookUrls) {
+        await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(webhookPayload),
+        });
+      }
+
+      console.log("📡 Webhook notification sent successfully");
+    } catch (error) {
+      console.error("❌ Failed to send webhook notification:", error);
+    }
+  };
+
+  const sendEmailNotification = async (detection: DetectionData) => {
+    try {
+      const emailData = {
+        to: "security@organization.com",
+        subject: `🚨 WEAPON DETECTION ALERT - ${detection.location}`,
+        weaponType: detection.weaponType,
+        confidence: detection.confidence,
+        location: detection.location,
+        timestamp: detection.timestamp,
+        severity: detection.severity,
+        screenshot: detection.screenshot,
+      };
+
+      const response = await fetch("/api/send-email", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(emailData),
+      });
+
+      if (response.ok) {
+        console.log("📧 Email notification sent successfully");
+      } else {
+        throw new Error("Failed to send email");
+      }
+    } catch (error) {
+      console.error("❌ Failed to send email notification:", error);
+    }
+  };
+
+  const sendManualEmail = async () => {
+    if (isSendingEmail || detections.length === 0) return;
+
+    setIsSendingEmail(true);
+
+    try {
+      const latestDetection = detections[0];
+      const emailData = {
+        to: "security@organization.com",
+        subject: `📊 MANUAL SECURITY REPORT - Logs Summary`,
+        weaponType: `${detections.length} total detections in logs`,
+        confidence: 100,
+        location: "Dashboard Logs",
+        timestamp: new Date().toISOString(),
+        severity: detections.some((d) => d.severity === "high")
+          ? "high"
+          : detections.some((d) => d.severity === "medium")
+          ? "medium"
+          : ("low" as const),
+        screenshot: latestDetection.screenshot || "",
+      };
+
+      const response = await fetch("/api/send-email", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(emailData),
+      });
+
+      if (response.ok) {
+        console.log("📧 Manual logs email sent successfully");
+      } else {
+        throw new Error("Failed to send manual logs email");
+      }
+    } catch (error) {
+      console.error("❌ Failed to send manual logs email:", error);
+    } finally {
+      setIsSendingEmail(false);
     }
   };
 
@@ -243,7 +363,11 @@ export default function Dashboard() {
                     cameraName={camera.name}
                     camera={camera}
                     onDetection={handleDetection}
-                    active={Number.isFinite(selectedSendIndex) ? index + 1 === selectedSendIndex : true}
+                    active={
+                      Number.isFinite(selectedSendIndex)
+                        ? index + 1 === selectedSendIndex
+                        : true
+                    }
                   />
 
                   {/* Enhanced Camera Info Overlay */}
@@ -292,7 +416,15 @@ export default function Dashboard() {
 
         {/* Enhanced Right sidebar - Logs Panel */}
         <div className="w-96 bg-gradient-to-b from-gray-900 to-black border-l-4 border-green-500">
-          <LogsPanel detections={detections} />
+          <LogsPanel
+            detections={detections}
+            webhookEnabled={webhookEnabled}
+            emailEnabled={emailEnabled}
+            isSendingEmail={isSendingEmail}
+            onWebhookToggle={() => setWebhookEnabled(!webhookEnabled)}
+            onEmailToggle={() => setEmailEnabled(!emailEnabled)}
+            onSendManualEmail={sendManualEmail}
+          />
         </div>
       </div>
 
